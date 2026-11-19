@@ -78,10 +78,42 @@ jobs:
             if grep -q "^# CONFIG_PACKAGE_${p} is not set" .config; then echo "  [已关闭] $p"; else echo "  [仍启用] $p"; fi
           done
           echo "=========== rust 依赖检查 ==========="
-          for p in rust shadowsocks-rust-sslocal shadowsocks-rust-ssserver rustdesk-server python3-cryptography dns2socks-rust naiveproxy gn; do
+          for p in rust shadowsocks-rust-sslocal shadowsocks-rust-ssserver rustdesk-server python3-cryptography dns2socks-rust; do
             if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then echo "::warning::[rust 仍启用] ${p}"; else echo "  [已关闭] $p"; fi
           done
           if grep -q "^CONFIG_RUST_SCCACHE=y" .config; then echo "::warning::RUST_SCCACHE 仍开启"; else echo "  [已关闭] RUST_SCCACHE"; fi
+          # 兜底：若上面仍有包被 select 回配置，用 scripts/config 强关一次再收敛
+          BAD0=0
+          for p in rust naiveproxy shadowsocks-rust-sslocal shadowsocks-rust-ssserver rustdesk-server python3-cryptography dns2socks-rust; do
+            grep -q "^CONFIG_PACKAGE_${p}=y" .config && BAD0=1
+          done
+          if [ "$BAD0" = "1" ]; then
+            echo "=========== 检测到包被强制启用，执行第二轮强关 ==========="
+            ./scripts/config --file .config -d RUST_SCCACHE \
+              -d PACKAGE_rust -d PACKAGE_naiveproxy \
+              -d PACKAGE_shadowsocks-rust-sslocal -d PACKAGE_shadowsocks-rust-ssserver \
+              -d PACKAGE_rustdesk-server -d PACKAGE_luci-app-rustdesk-server \
+              -d PACKAGE_python3-cryptography -d PACKAGE_python3-cryptography-src \
+              -d PACKAGE_dns2socks-rust \
+              -d PACKAGE_luci-app-ssr-plus_INCLUDE_NaiveProxy \
+              -d PACKAGE_luci-app-passwall_INCLUDE_NaiveProxy \
+              -d PACKAGE_luci-app-passwall_INCLUDE_Shadowsocks_Rust_Client \
+              -d PACKAGE_luci-app-passwall_INCLUDE_Shadowsocks_Rust_Server \
+              -d PACKAGE_luci-app-passwall2_INCLUDE_NaiveProxy \
+              -d PACKAGE_luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
+              -d PACKAGE_luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
+              || true
+            make olddefconfig > /dev/null 2>&1 || true
+          fi
+          echo "=========== 终检：rust/naiveproxy 必须关闭 ==========="
+          BAD=0
+          for p in rust naiveproxy shadowsocks-rust-sslocal shadowsocks-rust-ssserver rustdesk-server python3-cryptography dns2socks-rust; do
+            if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then echo "::error::[仍启用] ${p}"; BAD=1; fi
+          done
+          grep -q "^CONFIG_RUST_SCCACHE=y" .config && { echo "::error::RUST_SCCACHE 仍开启"; BAD=1; } || true
+          if [ "$BAD" = "1" ]; then echo "配置无法关闭 rust/naiveproxy 依赖，停止编译以免白跑"; exit 1; fi
+          echo "  [OK] 全部已关闭，rustc/gn 不会再被编"
+          echo "最终启用包数: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
 
       - name: Cache downloads and ccache
         uses: actions/cache@v4
