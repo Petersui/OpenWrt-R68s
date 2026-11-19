@@ -82,7 +82,7 @@ jobs:
             if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then echo "::warning::[rust 仍启用] ${p}"; else echo "  [已关闭] $p"; fi
           done
           if grep -q "^CONFIG_RUST_SCCACHE=y" .config; then echo "::warning::RUST_SCCACHE 仍开启"; else echo "  [已关闭] RUST_SCCACHE"; fi
-          # 就地关闭：直接改写最终 .config（不依赖追加顺序，防止被 feeds/defconfig 重写丢失）
+          # 就地关闭：直接改写最终 .config（防止被 feeds/defconfig 重写丢失）
           disable_sym() {
             if grep -q "^CONFIG_${1}=y" .config; then
               sed -i "s/^CONFIG_${1}=y$/# CONFIG_${1} is not set/" .config
@@ -98,43 +98,18 @@ jobs:
                    PACKAGE_luci-app-passwall_INCLUDE_NaiveProxy PACKAGE_luci-app-passwall2_INCLUDE_NaiveProxy; do
             disable_sym "$p"
           done
-          # 彻底断掉 gn(host)：把 naiveproxy 换成不含 gn 的占位包
+          # 断掉 gn(host)：naiveproxy 换成无 gn 依赖的占位包
           if [ -d feeds/helloworld/naiveproxy ]; then
-            cat > feeds/helloworld/naiveproxy/Makefile <<'MK'
-include $(TOPDIR)/rules.mk
-PKG_NAME:=naiveproxy
-PKG_VERSION:=0.0.0
-PKG_RELEASE:=1
-PKG_BUILD_PARALLEL:=1
-include $(INCLUDE_DIR)/package.mk
-define Package/naiveproxy
-  SECTION:=net
-  CATEGORY:=Network
-  TITLE:=naiveproxy (placeholder, gn/rust not built)
-  DEPENDS:=+libstdcpp
-  PKGARCH:=all
-endef
-define Package/naiveproxy/description
-  Placeholder package: naiveproxy real binary is not built in this CI image.
-endef
-define Build/Compile
-endef
-define Package/naiveproxy/install
-	$(INSTALL_DIR) $(1)/usr/bin
-endef
-$(eval $(call BuildPackage,naiveproxy))
-MK
-            echo "  [已替换] naiveproxy -> 无 gn 依赖占位包"
+            echo 'aW5jbHVkZSAkKFRPUERJUikvcnVsZXMubWsKUEtHX05BTUU6PW5haXZlcHJveHkKUEtHX1ZFUlNJT046PTAuMC4wClBLR19SRUxFQVNFOj0xClBLR19CVUlMRF9QQVJBTExFTDo9MQppbmNsdWRlICQoSU5DTFVERV9ESVIpL3BhY2thZ2UubWsKZGVmaW5lIFBhY2thZ2UvbmFpdmVwcm94eQogIFNFQ1RJT046PW5ldAogIENBVEVHT1JZOj1OZXR3b3JrCiAgVElUTEU6PW5haXZlcHJveHkgKHBsYWNlaG9sZGVyLCBubyBnbi9ydXN0KQogIERFUEVORFM6PStsaWJzdGRjcHAKZW5kZWYKZGVmaW5lIFBhY2thZ2UvbmFpdmVwcm94eS9kZXNjcmlwdGlvbgogIFBsYWNlaG9sZGVyOiByZWFsIG5haXZlcHJveHkgYmluYXJ5IGlzIG5vdCBidWlsdCBpbiBDSS4KZW5kZWYKZGVmaW5lIEJ1aWxkL0NvbXBpbGUKZW5kZWYKZGVmaW5lIFBhY2thZ2UvbmFpdmVwcm94eS9pbnN0YWxsCgkkKElOU1RBTExfRElSKSAkKDEpL3Vzci9iaW4KZW5kZWYKJChldmFsICQoY2FsbCBCdWlsZFBhY2thZ2UsbmFpdmVwcm94eSkpCg==' | base64 -d > feeds/helloworld/naiveproxy/Makefile
+            echo "  [已替换] naiveproxy -> 占位包（不再编 gn）"
           fi
           touch .config
-          echo "=========== 终检：rust/naiveproxy/gn 必须关闭 ==========="
-          BAD=0
-          grep -q "^CONFIG_PACKAGE_naiveproxy=y" .config && { echo "::warning::naiveproxy 仍启用（已用占位包规避 gn）"; }
-          for p in rust RUST_SCCACHE shadowsocks-rust-sslocal rustdesk-server python3-cryptography dns2socks-rust; do
-            key=$p; [ "$p" = "RUST_SCCACHE" ] && key=RUST_SCCACHE
-            if grep -q "^CONFIG_RUST_SCCACHE=y" .config && [ "$key" = "RUST_SCCACHE" ]; then echo "::warning::RUST_SCCACHE 仍开启"; fi
-            if grep -q "^CONFIG_PACKAGE_${p}=y" .config && [ "$key" != "RUST_SCCACHE" ]; then echo "::warning::[仍启用] ${p}"; fi
+          echo "=========== 终检 ==========="
+          grep -q "^CONFIG_PACKAGE_naiveproxy=y" .config && echo "::warning::naiveproxy 仍启用（已用占位包规避 gn）" || true
+          for p in rust shadowsocks-rust-sslocal rustdesk-server python3-cryptography dns2socks-rust; do
+            grep -q "^CONFIG_PACKAGE_${p}=y" .config && echo "::warning::[仍启用] ${p}" || true
           done
+          grep -q "^CONFIG_RUST_SCCACHE=y" .config && echo "::warning::RUST_SCCACHE 仍开启" || true
           echo "最终启用包数: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
 
       - name: Cache downloads and ccache
