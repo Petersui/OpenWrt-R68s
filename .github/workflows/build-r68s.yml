@@ -72,6 +72,21 @@ jobs:
             exit 1
           fi
           grep -E "^CONFIG_TARGET_rockchip|DEVICE_fastrhino" .config
+          echo "=========== 精简检查 ==========="
+          echo "启用包总数: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
+          for p in mariadb-server clamav spamassassin samba4-server squid node libpam ffmpeg; do
+            if grep -q "^# CONFIG_PACKAGE_${p} is not set" .config; then echo "  [已关闭] $p"; else echo "  [仍启用] $p"; fi
+          done
+
+      - name: Cache downloads and ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            lede/dl
+            ~/.ccache
+          key: lede-dl-${{ github.run_id }}
+          restore-keys: |
+            lede-dl-
 
       - name: Download source packages
         run: |
@@ -81,9 +96,14 @@ jobs:
 
       - name: Build firmware
         run: |
-          set -o pipefail
           cd lede
-          make -j$(nproc) V=s 2>&1 | tee ../build.log | tail -n 600
+          make -j$(nproc) V=s > ../build.log 2>&1
+          rc=$?
+          echo "make exit code: $rc"
+          gzip -9 -c ../build.log > ../build.log.gz || true
+          echo "===== 日志尾部 200 行 ====="
+          tail -n 200 ../build.log
+          exit $rc
 
       - name: Collect artifacts
         if: always()
@@ -95,8 +115,11 @@ jobs:
             cp lede/bin/targets/rockchip/armv8/*.bin out/ 2>/dev/null || true
           fi
           cp lede/.config out/BUILD-CONFIG.txt 2>/dev/null || true
+          cp build.log.gz out/ 2>/dev/null || true
           if [ -f build.log ]; then
-            grep -iE "error|warning: |failed" build.log | tail -n 100 > out/build-errors.txt || true
+            grep -nE "make\[[0-9]\]\: \*\*\*|: error:|Error [0-9]" build.log | tail -n 200 > out/build-errors.txt || true
+            echo "== 首个报错上下文 =="
+            grep -m1 -nE "make\[[0-9]\]\: \*\*\*|: error:" build.log || true
           fi
           ls -lh out/ || true
 
