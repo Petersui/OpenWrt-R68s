@@ -78,7 +78,7 @@ jobs:
             if grep -q "^# CONFIG_PACKAGE_${p} is not set" .config; then echo "  [已关闭] $p"; else echo "  [仍启用] $p"; fi
           done
           echo "=========== rust 依赖检查 ==========="
-          for p in rust shadowsocks-rust-sslocal shadowsocks-rust-ssserver rustdesk-server python3-cryptography dns2socks-rust; do
+          for p in rust shadowsocks-rust-sslocal shadowsocks-rust-ssserver rustdesk-server python3-cryptography dns2socks-rust naiveproxy gn; do
             if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then echo "::warning::[rust 仍启用] ${p}"; else echo "  [已关闭] $p"; fi
           done
           if grep -q "^CONFIG_RUST_SCCACHE=y" .config; then echo "::warning::RUST_SCCACHE 仍开启"; else echo "  [已关闭] RUST_SCCACHE"; fi
