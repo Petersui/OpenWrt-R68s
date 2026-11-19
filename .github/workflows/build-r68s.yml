@@ -74,7 +74,7 @@ jobs:
           grep -E "^CONFIG_TARGET_rockchip|DEVICE_fastrhino" .config
           echo "=========== 精简检查 ==========="
           echo "启用包总数: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
-          for p in mariadb-server clamav spamassassin samba4-server squid node libpam ffmpeg; do
+          for p in rust mariadb-server clamav spamassassin libpam node; do
             if grep -q "^# CONFIG_PACKAGE_${p} is not set" .config; then echo "  [已关闭] $p"; else echo "  [仍启用] $p"; fi
           done
 
@@ -96,13 +96,14 @@ jobs:
 
       - name: Build firmware
         run: |
+          set +e
           cd lede
           make -j$(nproc) V=s > ../build.log 2>&1
           rc=$?
           echo "make exit code: $rc"
-          gzip -9 -c ../build.log > ../build.log.gz || true
+          tail -n 12000 ../build.log > ../build-tail.txt 2>/dev/null
           echo "===== 日志尾部 200 行 ====="
-          tail -n 200 ../build.log
+          tail -n 200 ../build.log 2>/dev/null || true
           exit $rc
 
       - name: Collect artifacts
@@ -115,7 +116,7 @@ jobs:
             cp lede/bin/targets/rockchip/armv8/*.bin out/ 2>/dev/null || true
           fi
           cp lede/.config out/BUILD-CONFIG.txt 2>/dev/null || true
-          cp build.log.gz out/ 2>/dev/null || true
+          cp build-tail.txt out/build-tail.txt 2>/dev/null || true
           if [ -f build.log ]; then
             grep -nE "make\[[0-9]\]\: \*\*\*|: error:|Error [0-9]" build.log | tail -n 200 > out/build-errors.txt || true
             echo "== 首个报错上下文 =="
