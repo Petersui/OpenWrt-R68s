@@ -77,6 +77,11 @@ jobs:
           for p in rust mariadb-server clamav spamassassin libpam node; do
             if grep -q "^# CONFIG_PACKAGE_${p} is not set" .config; then echo "  [已关闭] $p"; else echo "  [仍启用] $p"; fi
           done
+          echo "=========== rust 依赖检查 ==========="
+          for p in rust shadowsocks-rust-sslocal shadowsocks-rust-ssserver rustdesk-server python3-cryptography dns2socks-rust; do
+            if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then echo "::warning::[rust 仍启用] ${p}"; else echo "  [已关闭] $p"; fi
+          done
+          if grep -q "^CONFIG_RUST_SCCACHE=y" .config; then echo "::warning::RUST_SCCACHE 仍开启"; else echo "  [已关闭] RUST_SCCACHE"; fi
 
       - name: Cache downloads and ccache
         uses: actions/cache@v4
@@ -93,6 +98,14 @@ jobs:
           set -o pipefail
           cd lede
           make -j8 download V=s 2>&1 | tail -n 300
+
+      - name: Prepare sccache shim
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          printf '#!/bin/sh\nexec "$@"\n' > "$HOME/.local/bin/sccache"
+          chmod +x "$HOME/.local/bin/sccache"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/sccache" echo shim-ok
 
       - name: Build firmware
         run: |
