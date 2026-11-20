@@ -2,8 +2,6 @@ name: Build LEDE for FastRhino R68S
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master]
   schedule:
     - cron: '0 16 * * 0'
 
@@ -14,7 +12,7 @@ jobs:
   build:
     name: Build R68S firmware
     runs-on: ubuntu-22.04
-    timeout-minutes: 350
+    timeout-minutes: 360
 
     steps:
       - name: Checkout build config
@@ -57,6 +55,18 @@ jobs:
           ./scripts/feeds install -d y -p istore luci-app-store || true
           bash ../scripts/diy-part2.sh
           make defconfig
+          echo "=========== 精简配置 ==========="
+          # LEDE feeds 新包默认 y（整配约 9900 个，编不完 6 小时），只保留 configs 里显式启用的项 + 必需基础包
+          grep '^CONFIG_PACKAGE_.*=y$' ../configs/r68s.config | sed -e 's/^CONFIG_//' -e 's/=y$//' | sort -u > ../keep.txt
+          for p in luci-app-store luci-app-dockerman luci-i18n-dockerman-zh-cn luci-lib-taskd luci-lib-xterm taskd docker dockerd docker-compose luci luci-base luci-compat; do echo "PACKAGE_${p}" >> ../keep.txt; done
+          sort -u ../keep.txt -o ../keep.txt
+          echo "保留白名单包数: $(wc -l < ../keep.txt)"
+          awk 'NR==FNR { k[$0]=1; next }
+               /^CONFIG_PACKAGE_[A-Za-z0-9_.+-]*=y$/ { n=$0; sub(/=y$/,"",n); if (n in k) print $0; else print "# " n " is not set"; next }
+               { print }' ../keep.txt .config > .config.slim
+          mv .config.slim .config
+          make defconfig
+          echo "精简后启用包数: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
           echo "=========== 关键包自检 ==========="
           miss=0
           for p in luci-app-store luci-app-dockerman docker dockerd luci-lib-taskd taskd; do
