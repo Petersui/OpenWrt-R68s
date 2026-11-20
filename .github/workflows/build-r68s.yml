@@ -110,8 +110,9 @@ jobs:
           if grep -q "^CONFIG_RUST_SCCACHE=y" .config; then echo "::warning::RUST_SCCACHE 仍开启"; else echo "  [已关闭] RUST_SCCACHE"; fi
           # 就地关闭：直接改写最终 .config（防止被 feeds/defconfig 重写丢失）
           disable_sym() {
-            if grep -q "^CONFIG_${1}=y" .config; then
-              sed -i "s/^CONFIG_${1}=y$/# CONFIG_${1} is not set/" .config
+            if grep -qE "^CONFIG_${1}=[ym]" .config; then
+              sed -i -e "s/^CONFIG_${1}=y$/# CONFIG_${1} is not set/" \
+                     -e "s/^CONFIG_${1}=m$/# CONFIG_${1} is not set/" .config
             fi
             grep -q "^# CONFIG_${1} is not set$" .config || echo "# CONFIG_${1} is not set" >> .config
           }
@@ -122,6 +123,10 @@ jobs:
                    PACKAGE_python3-cryptography PACKAGE_python3-cryptography-src PACKAGE_dns2socks-rust \
                    PACKAGE_luci-app-ssr-plus_INCLUDE_NaiveProxy \
                    PACKAGE_luci-app-passwall_INCLUDE_NaiveProxy PACKAGE_luci-app-passwall2_INCLUDE_NaiveProxy; do
+            disable_sym "$p"
+          done
+          # sing-box 1.14.4 在 CI 上链接失败(collect2/ld)，且非用户点名包；连 paswall2 的 sing-box 核心一起关
+          for p in PACKAGE_sing-box PACKAGE_luci-app-passwall2_Basic_Core_SingBox; do
             disable_sym "$p"
           done
           # 断掉 gn(host)：naiveproxy 换成无 gn 依赖的占位包
@@ -181,19 +186,13 @@ jobs:
         run: |
           set +e
           cd lede
-          rc=1
-          for i in 1 2 3; do
-            make -j$(nproc) V=s > ../build-$i.log 2>&1
-            rc=$?
-            cp ../build-$i.log ../build.log
-            if [ $rc -eq 0 ]; then echo "第 $i 次构建成功"; break; fi
-            echo "第 $i 次构建失败 rc=$rc（增量续编）"
-          done
+          make -j$(nproc) V=s > ../build.log 2>&1
+          rc=$?
           echo "make exit code: $rc"
           tail -n 12000 ../build.log > ../build-tail.txt 2>/dev/null
           ln=$(grep -nE 'make\[[0-9]+\]: \*\*\*|^ERROR|: error:' ../build.log | grep -v 'ignored' | grep -v 'stdc-predef' | head -1 | cut -d: -f1)
           if [ -n "$ln" ]; then
-            a=$((ln-140)); [ $a -lt 1 ] && a=1
+            a=$((ln-200)); [ $a -lt 1 ] && a=1
             b=$((ln+80))
             sed -n "${a},${b}p" ../build.log > ../fail-context.txt
             echo "===== 首个失败上下文（第 $a-$b 行）====="
@@ -201,6 +200,8 @@ jobs:
           fi
           echo "===== 日志尾部 200 行 ====="
           tail -n 200 ../build.log 2>/dev/null || true
+          gzip -9 -c ../build.log | split -b 20m - ../log-part- 2>/dev/null || true
+          ls -lh ../log-part-* 2>/dev/null || true
           exit $rc
 
       - name: Collect artifacts
@@ -215,6 +216,7 @@ jobs:
           cp lede/.config out/BUILD-CONFIG.txt 2>/dev/null || true
           cp build-tail.txt out/build-tail.txt 2>/dev/null || true
           cp fail-context.txt out/fail-context.txt 2>/dev/null || true
+          cp log-part-* out/ 2>/dev/null || true
           if [ -f build.log ]; then
             grep -nE "make\[[0-9]\]\: \*\*\*|: error:|Error [0-9]" build.log | tail -n 200 > out/build-errors.txt || true
             echo "== 首个报错上下文 =="
