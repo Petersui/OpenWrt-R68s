@@ -62,7 +62,7 @@ jobs:
           sort -u ../keep.txt -o ../keep.txt
           echo "保留白名单包数: $(wc -l < ../keep.txt)"
           awk 'NR==FNR { k[$0]=1; next }
-               /^CONFIG_PACKAGE_[A-Za-z0-9_.+-]*=y$/ { n=$0; sub(/=y$/,"",n); if (n in k) print $0; else print "# " n " is not set"; next }
+               /^CONFIG_PACKAGE_[A-Za-z0-9_.+-]*=y$/ { n=$0; sub(/^CONFIG_/,"",n); sub(/=y$/,"",n); if (n in k) print $0; else print "# CONFIG_" n " is not set"; next }
                { print }' ../keep.txt .config > .config.slim
           mv .config.slim .config
           make defconfig
