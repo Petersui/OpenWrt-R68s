@@ -45,6 +45,19 @@ jobs:
       - name: Clone LEDE (coolsnowwolf/lede master)
         run: git clone --depth 1 -b master https://github.com/coolsnowwolf/lede.git lede
 
+      - name: Patch broken legacy fs kmods (ntfs / reiserfs)
+        run: |
+          cd lede
+          FS=package/kernel/linux/modules/fs.mk
+          for k in fs-ntfs fs-reiserfs; do
+            sed -i "/^define KernelPackage\/${k}\$/ , /^endef\$/d" "$FS"
+            sed -i "/^define KernelPackage\/${k}\/description/ , /^endef\$/d" "$FS"
+            sed -i "/call KernelPackage,${k})/d" "$FS"
+            echo "  [已剔除] kmod-${k}（当前内核已无对应驱动，6.18 只剩 ntfs3）"
+          done
+          grep -n "fs-ntfs\b\|fs-reiserfs" "$FS" || echo "  fs.mk 已无 ntfs/reiserfs 定义"
+          ls fs 2>/dev/null || true
+
       - name: Configure target, feeds and packages
         run: |
           cd lede
@@ -67,6 +80,9 @@ jobs:
           mv .config.slim .config
           make defconfig
           echo "精简后启用包数: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
+          for p in kmod-fs-ntfs kmod-fs-reiserfs; do
+            if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then echo "::error::${p} 仍未关闭"; exit 1; else echo "  [已关闭] ${p}"; fi
+          done
           echo "=========== 关键包自检 ==========="
           miss=0
           for p in luci-app-store luci-app-dockerman docker dockerd luci-lib-taskd taskd; do
