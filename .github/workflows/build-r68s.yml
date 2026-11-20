@@ -112,6 +112,21 @@ jobs:
           grep -q "^CONFIG_RUST_SCCACHE=y" .config && echo "::warning::RUST_SCCACHE 仍开启" || true
           echo "最终启用包数: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
 
+      - name: Patch hamlib (skip autoreconf)
+        run: |
+          cd lede
+          HB=feeds/packages/utils/hamlib/Makefile
+          if [ -f "$HB" ]; then
+            sed -i '/^PKG_FIXUP:=autoreconf.*$/d' "$HB"
+            if grep -q "PKG_FIXUP" "$HB"; then
+              echo "::warning::hamlib 仍残留 PKG_FIXUP"
+            else
+              echo "  [已修补] hamlib: 移除 PKG_FIXUP:=autoreconf（改用源码包自带 configure）"
+            fi
+          else
+            echo "  [跳过] 未找到 feeds/packages/utils/hamlib/Makefile"
+          fi
+
       - name: Cache downloads and ccache
         uses: actions/cache@v4
         with:
