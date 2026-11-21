@@ -129,8 +129,9 @@ jobs:
           for p in PACKAGE_sing-box PACKAGE_luci-app-passwall2_Basic_Core_SingBox; do
             disable_sym "$p"
           done
-          # busybox 1.38 + 新版 libselinux 头：security_context_t 被标记 deprecated，配 -Werror 直接编译失败
+          # busybox 1.38：SELinux 分支撞新版 libselinux deprecated 类型；EXTRA_COMPAT 走 glibc 私有 regex API（musl 无）
           for p in BUSYBOX_CONFIG_SELINUX BUSYBOX_CONFIG_FEATURE_TAR_SELINUX BUSYBOX_CONFIG_SELINUXENABLED \
+                   BUSYBOX_CONFIG_EXTRA_COMPAT BUSYBOX_DEFAULT_EXTRA_COMPAT \
                    BUSYBOX_DEFAULT_SELINUX BUSYBOX_DEFAULT_FEATURE_TAR_SELINUX BUSYBOX_DEFAULT_SELINUXENABLED; do
             disable_sym "$p"
           done
