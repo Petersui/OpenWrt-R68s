@@ -189,11 +189,33 @@ jobs:
           restore-keys: |
             lede-dl-
 
+      - name: Patch download timeouts (stalled mirrors)
+        run: |
+          cd lede
+          sed -i 's|curl -f --connect-timeout 20 --retry 5 --location|curl -f --connect-timeout 20 --max-time 900 --speed-limit 1024 --speed-time 60 --retry 5 --location|' scripts/download.pl
+          grep -q -- '--speed-time 60' scripts/download.pl && echo "download.pl patched" || { echo "download.pl patch FAILED"; exit 1; }
+
       - name: Download source packages
         run: |
-          set -o pipefail
           cd lede
-          make -j8 download V=s 2>&1 | tail -n 300
+          rc=1
+          tos="1200 900 600 600"
+          i=1
+          for to in $tos; do
+            echo "== 下载尝试 $i（上限 ${to}s）=="
+            timeout $to make -j8 download V=s > ../download-$i.log 2>&1
+            rc=$?
+            echo "attempt $i rc=$rc"
+            tail -n 25 ../download-$i.log || true
+            gzip -9 -c ../download-$i.log | split -b 10m - ../dl-log-$i- 2>/dev/null || true
+            if [ $rc -eq 0 ]; then break; fi
+            i=$((i+1))
+          done
+          if [ $rc -ne 0 ]; then
+            echo "===== 下载失败，缺失文件 ====="
+            grep -E 'No rule to make target|download failed|Hash mismatch|failed to download|is not available' ../download-*.log | tail -n 60 || true
+            exit 1
+          fi
 
       - name: Prepare sccache shim
         run: |
@@ -241,6 +263,7 @@ jobs:
           cp build-tail.txt out/build-tail.txt 2>/dev/null || true
           cp fail-context.txt out/fail-context.txt 2>/dev/null || true
           cp log-part-* out/ 2>/dev/null || true
+          cp download-*.log dl-log-* out/ 2>/dev/null || true
           if [ -f build.log ]; then
             grep -nE "make\[[0-9]\]\: \*\*\*|: error:|Error [0-9]" build.log | tail -n 200 > out/build-errors.txt || true
             echo "== 首个报错上下文 =="
