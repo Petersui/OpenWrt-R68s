@@ -129,6 +129,10 @@ jobs:
           for p in PACKAGE_sing-box PACKAGE_luci-app-passwall2_Basic_Core_SingBox; do
             disable_sym "$p"
           done
+          # chicken-scheme：Makefile 里把 $(CC) 当 make 目标（/No rule to make target/），与 ccache 包裹冲突
+          for p in PACKAGE_chicken-scheme; do
+            disable_sym "$p"
+          done
           # busybox 1.38：关 SELinux 分支 / EXTRA_COMPAT（glibc 私有 regex）/ WERROR（老 applet 警告变错误）
           for p in BUSYBOX_CONFIG_SELINUX BUSYBOX_CONFIG_FEATURE_TAR_SELINUX BUSYBOX_CONFIG_SELINUXENABLED \
                    BUSYBOX_CONFIG_EXTRA_COMPAT BUSYBOX_DEFAULT_EXTRA_COMPAT \
@@ -187,13 +191,12 @@ jobs:
             echo "  [跳过] 未找到 $BF"
           fi
 
-      - name: Cache downloads and ccache
-        uses: actions/cache@v4
+      - name: Restore downloads and ccache
+        uses: actions/cache/restore@v4
         with:
           path: |
             lede/dl
             lede/.ccache
-            ~/.ccache
           key: lede-${{ github.run_id }}
           restore-keys: |
             lede-
@@ -267,6 +270,15 @@ jobs:
           gzip -9 -c ../build.log | split -b 20m - ../log-part- 2>/dev/null || true
           ls -lh ../log-part-* 2>/dev/null || true
           exit $rc
+
+      - name: Save downloads and ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            lede/dl
+            lede/.ccache
+          key: lede-${{ github.run_id }}
 
       - name: Collect artifacts
         if: always()
