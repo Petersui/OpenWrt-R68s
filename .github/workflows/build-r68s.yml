@@ -130,7 +130,7 @@ jobs:
             disable_sym "$p"
           done
           # chicken-scheme：Makefile 里把 $(CC) 当 make 目标（/No rule to make target/），与 ccache 包裹冲突
-          for p in PACKAGE_chicken-scheme; do
+          for p in PACKAGE_chicken-scheme PACKAGE_chicken-scheme-interpreter PACKAGE_chicken-scheme-full; do
             disable_sym "$p"
           done
           # busybox 1.38：关 SELinux 分支 / EXTRA_COMPAT（glibc 私有 regex）/ WERROR（老 applet 警告变错误）
