@@ -140,13 +140,16 @@ jobs:
                    BUSYBOX_DEFAULT_SELINUX BUSYBOX_DEFAULT_FEATURE_TAR_SELINUX BUSYBOX_DEFAULT_SELINUXENABLED; do
             disable_sym "$p"
           done
-          # ccache：跨 run 复用编译对象，把"6 小时硬上限"变成"可续编"
+          # ccache 关闭：ccache 把 $(CC) 变两段（"ccache aarch64-..."），
+          # 凡是把 $(CC) 当整体用的包（chicken-scheme、icu4c 的 runConfigureICU）都会挂；
+          # 且实测命中率接近 0，纯开销。改成只缓存 dl 源码包
+          sed -i 's|^CONFIG_CCACHE=y|# CONFIG_CCACHE is not set|' .config
           if grep -q "^# CONFIG_CCACHE is not set$" .config; then
-            sed -i 's/^# CONFIG_CCACHE is not set$/CONFIG_CCACHE=y/' .config
+            echo "  [已关闭] ccache（避免两段式 CC）"
+          else
+            echo "# CONFIG_CCACHE is not set" >> .config
+            echo "  [已追加关闭] ccache"
           fi
-          grep -q "^CONFIG_CCACHE=y" .config || echo "CONFIG_CCACHE=y" >> .config
-          sed -i 's|^CONFIG_CCACHE_DIR=.*|CONFIG_CCACHE_DIR=""|' .config
-          grep -q "^CONFIG_CCACHE=y" .config && echo "  [已开启] ccache（dir=lede/.ccache）" || { echo "::error::ccache 未开启"; exit 1; }
           # 断掉 gn(host)：naiveproxy 换成无 gn 依赖的占位包
           if [ -d feeds/helloworld/naiveproxy ]; then
             echo 'aW5jbHVkZSAkKFRPUERJUikvcnVsZXMubWsKUEtHX05BTUU6PW5haXZlcHJveHkKUEtHX1ZFUlNJT046PTAuMC4wClBLR19SRUxFQVNFOj0xClBLR19CVUlMRF9QQVJBTExFTDo9MQppbmNsdWRlICQoSU5DTFVERV9ESVIpL3BhY2thZ2UubWsKZGVmaW5lIFBhY2thZ2UvbmFpdmVwcm94eQogIFNFQ1RJT046PW5ldAogIENBVEVHT1JZOj1OZXR3b3JrCiAgVElUTEU6PW5haXZlcHJveHkgKHBsYWNlaG9sZGVyLCBubyBnbi9ydXN0KQogIERFUEVORFM6PStsaWJzdGRjcHAKZW5kZWYKZGVmaW5lIFBhY2thZ2UvbmFpdmVwcm94eS9kZXNjcmlwdGlvbgogIFBsYWNlaG9sZGVyOiByZWFsIG5haXZlcHJveHkgYmluYXJ5IGlzIG5vdCBidWlsdCBpbiBDSS4KZW5kZWYKZGVmaW5lIEJ1aWxkL0NvbXBpbGUKZW5kZWYKZGVmaW5lIFBhY2thZ2UvbmFpdmVwcm94eS9pbnN0YWxsCgkkKElOU1RBTExfRElSKSAkKDEpL3Vzci9iaW4KZW5kZWYKJChldmFsICQoY2FsbCBCdWlsZFBhY2thZ2UsbmFpdmVwcm94eSkpCg==' | base64 -d > feeds/helloworld/naiveproxy/Makefile
@@ -191,15 +194,14 @@ jobs:
             echo "  [跳过] 未找到 $BF"
           fi
 
-      - name: Restore downloads and ccache
+      - name: Restore downloaded tarballs
         uses: actions/cache/restore@v4
         with:
           path: |
             lede/dl
-            lede/.ccache
-          key: lede-${{ github.run_id }}
+          key: dl-${{ github.run_id }}
           restore-keys: |
-            lede-
+            dl-
 
       - name: Patch download timeouts (stalled mirrors)
         run: |
@@ -241,18 +243,13 @@ jobs:
         run: |
           set +e
           cd lede
-          ccache -M 4G >/dev/null 2>&1 || true
-          ccache -z >/dev/null 2>&1 || true
-          echo "ccache maxsize=$(ccache -M 2>/dev/null | tail -1)" || true
           # 5h05 上限（< 6h job 硬上限），保证收尾/保存缓存步骤能正常执行
           timeout --signal=TERM --kill-after=60 18300 make -j$(nproc) V=s > ../build.log 2>&1
           rc=$?
           echo "make exit code: $rc"
           if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
-            echo "::warning::构建触及 5h05 上限（非编译错误），ccache 已保存，下一轮可续编"
+            echo "::warning::构建触及 5h05 上限（非编译错误，未完成）"
           fi
-          echo "===== ccache 统计 ====="
-          ccache -s 2>/dev/null | head -20 || true
           tail -n 12000 ../build.log > ../build-tail.txt 2>/dev/null
           ln=$(grep -nE 'make\[2\]: \*\*\* \[package/Makefile:[0-9]+: package/' ../build.log | head -1 | cut -d: -f1)
           if [ -z "$ln" ]; then
@@ -271,14 +268,13 @@ jobs:
           ls -lh ../log-part-* 2>/dev/null || true
           exit $rc
 
-      - name: Save downloads and ccache
+      - name: Save downloaded tarballs
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
             lede/dl
-            lede/.ccache
-          key: lede-${{ github.run_id }}
+          key: dl-${{ github.run_id }}
 
       - name: Collect artifacts
         if: always()
