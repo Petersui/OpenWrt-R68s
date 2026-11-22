@@ -134,9 +134,12 @@ jobs:
             disable_sym "$p"
           done
           # busybox 1.38：关 SELinux 分支 / EXTRA_COMPAT（glibc 私有 regex）/ WERROR（老 applet 警告变错误）
+          #           / INETD_RPC 与 MOUNT_NFS（两者 #include <rpc/rpc.h>，musl 无该头，且 libtirpc 阶段顺序不保证）
           for p in BUSYBOX_CONFIG_SELINUX BUSYBOX_CONFIG_FEATURE_TAR_SELINUX BUSYBOX_CONFIG_SELINUXENABLED \
                    BUSYBOX_CONFIG_EXTRA_COMPAT BUSYBOX_DEFAULT_EXTRA_COMPAT \
                    BUSYBOX_CONFIG_WERROR BUSYBOX_DEFAULT_WERROR \
+                   BUSYBOX_CONFIG_FEATURE_INETD_RPC BUSYBOX_DEFAULT_FEATURE_INETD_RPC \
+                   BUSYBOX_CONFIG_FEATURE_MOUNT_NFS BUSYBOX_DEFAULT_FEATURE_MOUNT_NFS \
                    BUSYBOX_DEFAULT_SELINUX BUSYBOX_DEFAULT_FEATURE_TAR_SELINUX BUSYBOX_DEFAULT_SELINUXENABLED; do
             disable_sym "$p"
           done
