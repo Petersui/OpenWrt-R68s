@@ -135,11 +135,14 @@ jobs:
           done
           # busybox 1.38：关 SELinux 分支 / EXTRA_COMPAT（glibc 私有 regex）/ WERROR（老 applet 警告变错误）
           #           / INETD_RPC 与 MOUNT_NFS（两者 #include <rpc/rpc.h>，musl 无该头，且 libtirpc 阶段顺序不保证）
+          #           / TC（kernel 6.18 已从 UAPI 删除 CBQ 结构；tc 由 ip-full 提供）
           for p in BUSYBOX_CONFIG_SELINUX BUSYBOX_CONFIG_FEATURE_TAR_SELINUX BUSYBOX_CONFIG_SELINUXENABLED \
                    BUSYBOX_CONFIG_EXTRA_COMPAT BUSYBOX_DEFAULT_EXTRA_COMPAT \
                    BUSYBOX_CONFIG_WERROR BUSYBOX_DEFAULT_WERROR \
                    BUSYBOX_CONFIG_FEATURE_INETD_RPC BUSYBOX_DEFAULT_FEATURE_INETD_RPC \
                    BUSYBOX_CONFIG_FEATURE_MOUNT_NFS BUSYBOX_DEFAULT_FEATURE_MOUNT_NFS \
+                   BUSYBOX_CONFIG_TC BUSYBOX_DEFAULT_TC \
+                   BUSYBOX_CONFIG_FEATURE_TC_INGRESS BUSYBOX_DEFAULT_FEATURE_TC_INGRESS \
                    BUSYBOX_DEFAULT_SELINUX BUSYBOX_DEFAULT_FEATURE_TAR_SELINUX BUSYBOX_DEFAULT_SELINUXENABLED; do
             disable_sym "$p"
           done
@@ -247,27 +250,42 @@ jobs:
           set +e
           cd lede
           # 5h05 上限（< 6h job 硬上限），保证收尾/保存缓存步骤能正常执行
-          timeout --signal=TERM --kill-after=60 18300 make -j$(nproc) V=s > ../build.log 2>&1
+          LOGF=../build.log
+          timeout --signal=TERM --kill-after=60 18300 make -j$(nproc) V=s > $LOGF 2>&1
           rc=$?
           echo "make exit code: $rc"
           if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
             echo "::warning::构建触及 5h05 上限（非编译错误，未完成）"
           fi
-          tail -n 12000 ../build.log > ../build-tail.txt 2>/dev/null
-          ln=$(grep -nE 'make\[2\]: \*\*\* \[package/Makefile:[0-9]+: package/' ../build.log | head -1 | cut -d: -f1)
+          # 兜底：若又挂在 busybox（全量 applet 配置与 6.18 内核 UAPI 持续不兼容），
+          # 同一轮内退回 LEDE 默认 busybox 配置（Config-defaults.in）后续编，避免再耗一整轮 4 小时
+          if [ $rc -ne 0 ] && grep -q 'package/utils/busybox/compile' $LOGF; then
+            echo "::warning::busybox 全量 applet 配置再次失败 → 退回默认 busybox 配置续编"
+            sed -i 's|^CONFIG_BUSYBOX_CUSTOM=y|# CONFIG_BUSYBOX_CUSTOM is not set|' .config
+            grep -q '^# CONFIG_BUSYBOX_CUSTOM is not set$' .config || echo '# CONFIG_BUSYBOX_CUSTOM is not set' >> .config
+            make package/utils/busybox/clean V=s >> $LOGF 2>&1
+            LOGF=../build2.log
+            timeout --signal=TERM --kill-after=60 10800 make -j$(nproc) V=s > $LOGF 2>&1
+            rc=$?
+            echo "make(默认 busybox 续编) exit code: $rc"
+          fi
+          cat ../build.log > ../build-all.log 2>/dev/null || true
+          [ "$LOGF" != "../build.log" ] && cat ../build2.log >> ../build-all.log
+          tail -n 12000 ../build-all.log > ../build-tail.txt 2>/dev/null
+          ln=$(grep -nE 'make\[2\]: \*\*\* \[package/Makefile:[0-9]+: package/' $LOGF | head -1 | cut -d: -f1)
           if [ -z "$ln" ]; then
-            ln=$(grep -nE 'make\[[0-9]+\]: \*\*\*|^ERROR|: error:' ../build.log | grep -v 'ignored' | grep -v 'stdc-predef' | head -1 | cut -d: -f1)
+            ln=$(grep -nE 'make\[[0-9]+\]: \*\*\*|^ERROR|: error:' $LOGF | grep -v 'ignored' | grep -v 'stdc-predef' | head -1 | cut -d: -f1)
           fi
           if [ -n "$ln" ]; then
             a=$((ln-200)); [ $a -lt 1 ] && a=1
             b=$((ln+80))
-            sed -n "${a},${b}p" ../build.log > ../fail-context.txt
+            sed -n "${a},${b}p" $LOGF > ../fail-context.txt
             echo "===== 首个失败上下文（第 $a-$b 行）====="
             cat ../fail-context.txt
           fi
           echo "===== 日志尾部 200 行 ====="
-          tail -n 200 ../build.log 2>/dev/null || true
-          gzip -9 -c ../build.log | split -b 20m - ../log-part- 2>/dev/null || true
+          tail -n 200 ../build-all.log 2>/dev/null || true
+          gzip -9 -c ../build-all.log | split -b 20m - ../log-part- 2>/dev/null || true
           ls -lh ../log-part-* 2>/dev/null || true
           exit $rc
 
