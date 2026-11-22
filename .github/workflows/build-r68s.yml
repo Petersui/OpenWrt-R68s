@@ -133,19 +133,17 @@ jobs:
           for p in PACKAGE_chicken-scheme PACKAGE_chicken-scheme-interpreter PACKAGE_chicken-scheme-full; do
             disable_sym "$p"
           done
-          # busybox 1.38：关 SELinux 分支 / EXTRA_COMPAT（glibc 私有 regex）/ WERROR（老 applet 警告变错误）
-          #           / INETD_RPC 与 MOUNT_NFS（两者 #include <rpc/rpc.h>，musl 无该头，且 libtirpc 阶段顺序不保证）
-          #           / TC（kernel 6.18 已从 UAPI 删除 CBQ 结构；tc 由 ip-full 提供）
-          for p in BUSYBOX_CONFIG_SELINUX BUSYBOX_CONFIG_FEATURE_TAR_SELINUX BUSYBOX_CONFIG_SELINUXENABLED \
-                   BUSYBOX_CONFIG_EXTRA_COMPAT BUSYBOX_DEFAULT_EXTRA_COMPAT \
-                   BUSYBOX_CONFIG_WERROR BUSYBOX_DEFAULT_WERROR \
-                   BUSYBOX_CONFIG_FEATURE_INETD_RPC BUSYBOX_DEFAULT_FEATURE_INETD_RPC \
-                   BUSYBOX_CONFIG_FEATURE_MOUNT_NFS BUSYBOX_DEFAULT_FEATURE_MOUNT_NFS \
-                   BUSYBOX_CONFIG_TC BUSYBOX_DEFAULT_TC \
-                   BUSYBOX_CONFIG_FEATURE_TC_INGRESS BUSYBOX_DEFAULT_FEATURE_TC_INGRESS \
-                   BUSYBOX_DEFAULT_SELINUX BUSYBOX_DEFAULT_FEATURE_TAR_SELINUX BUSYBOX_DEFAULT_SELINUXENABLED; do
-            disable_sym "$p"
-          done
+          # busybox 1.38：全量自定义 applet 与 kernel 6.18 UAPI 持续冲突。已逐项修 SELinux / EXTRA_COMPAT
+          #           / WERROR / INETD_RPC / MOUNT_NFS / TC，仍在链接阶段 busybox_unstripped 失败。
+          #           不再逐项打补丁：整段清掉自定义 applet 开关，退回 LEDE Config-defaults.in 官方默认集
+          #           （即上游 CI 每日构建的组合，与 6.18 内核一致）
+          sed -i -e '/^CONFIG_BUSYBOX_CONFIG_/d' -e '/^CONFIG_BUSYBOX_DEFAULT_/d' .config
+          sed -i 's|^CONFIG_BUSYBOX_CUSTOM=y|# CONFIG_BUSYBOX_CUSTOM is not set|' .config
+          grep -q '^# CONFIG_BUSYBOX_CUSTOM is not set$' .config || echo '# CONFIG_BUSYBOX_CUSTOM is not set' >> .config
+          make defconfig
+          echo "  [busybox] 自定义模式已关闭；残留自定义 applet 项: $(grep -c '^CONFIG_BUSYBOX_CONFIG_' .config) 个（应为 0）"
+          echo "  [busybox] 默认项: $(grep -c '^CONFIG_BUSYBOX_DEFAULT_' .config) 个"
+          if grep -q '^CONFIG_BUSYBOX_CONFIG_' .config; then echo "::error::busybox 自定义项未清空，配置回退失败"; exit 1; fi
           # ccache 关闭：ccache 把 $(CC) 变两段（"ccache aarch64-..."），
           # 凡是把 $(CC) 当整体用的包（chicken-scheme、icu4c 的 runConfigureICU）都会挂；
           # 且实测命中率接近 0，纯开销。改成只缓存 dl 源码包
@@ -249,7 +247,8 @@ jobs:
         run: |
           set +e
           cd lede
-          # 5h05 上限（< 6h job 硬上限），保证收尾/保存缓存步骤能正常执行
+          mkdir -p ../out
+          # 5h05 上限（< 6h job 硬上限），保证收尾 / 保存缓存 / 上传 artifact 步骤能正常执行
           LOGF=../build.log
           timeout --signal=TERM --kill-after=60 18300 make -j$(nproc) V=s > $LOGF 2>&1
           rc=$?
@@ -257,21 +256,10 @@ jobs:
           if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
             echo "::warning::构建触及 5h05 上限（非编译错误，未完成）"
           fi
-          # 兜底：若又挂在 busybox（全量 applet 配置与 6.18 内核 UAPI 持续不兼容），
-          # 同一轮内退回 LEDE 默认 busybox 配置（Config-defaults.in）后续编，避免再耗一整轮 4 小时
-          if [ $rc -ne 0 ] && grep -q 'package/utils/busybox/compile' $LOGF; then
-            echo "::warning::busybox 全量 applet 配置再次失败 → 退回默认 busybox 配置续编"
-            sed -i 's|^CONFIG_BUSYBOX_CUSTOM=y|# CONFIG_BUSYBOX_CUSTOM is not set|' .config
-            grep -q '^# CONFIG_BUSYBOX_CUSTOM is not set$' .config || echo '# CONFIG_BUSYBOX_CUSTOM is not set' >> .config
-            make package/utils/busybox/clean V=s >> $LOGF 2>&1
-            LOGF=../build2.log
-            timeout --signal=TERM --kill-after=60 10800 make -j$(nproc) V=s > $LOGF 2>&1
-            rc=$?
-            echo "make(默认 busybox 续编) exit code: $rc"
-          fi
-          cat ../build.log > ../build-all.log 2>/dev/null || true
-          [ "$LOGF" != "../build.log" ] && cat ../build2.log >> ../build-all.log
+          # 构建一结束就立刻把诊断文件落到 out/，避免后续步骤被取消时日志全丢
+          cp ../build.log ../build-all.log 2>/dev/null || true
           tail -n 12000 ../build-all.log > ../build-tail.txt 2>/dev/null
+          cp ../build-tail.txt ../out/build-tail.txt 2>/dev/null || true
           ln=$(grep -nE 'make\[2\]: \*\*\* \[package/Makefile:[0-9]+: package/' $LOGF | head -1 | cut -d: -f1)
           if [ -z "$ln" ]; then
             ln=$(grep -nE 'make\[[0-9]+\]: \*\*\*|^ERROR|: error:' $LOGF | grep -v 'ignored' | grep -v 'stdc-predef' | head -1 | cut -d: -f1)
@@ -280,13 +268,16 @@ jobs:
             a=$((ln-200)); [ $a -lt 1 ] && a=1
             b=$((ln+80))
             sed -n "${a},${b}p" $LOGF > ../fail-context.txt
+            cp ../fail-context.txt ../out/fail-context.txt 2>/dev/null || true
             echo "===== 首个失败上下文（第 $a-$b 行）====="
             cat ../fail-context.txt
+          else
+            echo "===== 未定位到失败行，打印最后 200 行 ====="
+            tail -n 200 ../build-all.log 2>/dev/null || true
           fi
-          echo "===== 日志尾部 200 行 ====="
-          tail -n 200 ../build-all.log 2>/dev/null || true
-          gzip -9 -c ../build-all.log | split -b 20m - ../log-part- 2>/dev/null || true
-          ls -lh ../log-part-* 2>/dev/null || true
+          grep -nE "make\[[0-9]\]\: \*\*\*|: error:|Error [0-9]" ../build-all.log | tail -n 200 > ../out/build-errors.txt 2>/dev/null || true
+          gzip -9 -c ../build-all.log | split -b 20m - ../out/log-part- 2>/dev/null || true
+          ls -lh ../out/ 2>/dev/null || true
           exit $rc
 
       - name: Save downloaded tarballs
