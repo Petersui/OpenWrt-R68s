@@ -151,6 +151,19 @@ jobs:
             disable_sym "$p"
           done
           echo "  [图形栈] libmesa-llvmpipe / softpipe / drm / wayland 已关闭，避免编 hostpkg LLVM"
+          # 真正把 LLVM 拉起来的是 mesa 这一个大包：libteflon-rocket(=m，RKNPU TFLite 委托) 一旦被选中，
+          # mesa 的 PKG_BUILD_DEPENDS 就会连带编 hostpkg llvm-mesa（实测 1h41 还没编完，单这一项就撑爆 5h05）
+          # 同时 mesa 还会拉 glslang/spirv-tools/wayland-protocols/libva/vulkan-headers 一整串
+          for p in PACKAGE_libteflon-rocket PACKAGE_libteflon-etnaviv MESA_USE_LLVM; do
+            disable_sym "$p"
+          done
+          # rust/host 是 shadowsocks-rust 的构建依赖，要全量编 hostpkg rustc（实测 1h13）
+          # passwall 关掉 ss-rust 客户端后仍可用 xray/v2ray/go 内核，功能不受影响
+          for p in PACKAGE_luci-app-passwall_INCLUDE_Shadowsocks_Rust_Client \
+                   PACKAGE_luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client; do
+            disable_sym "$p"
+          done
+          echo "  [耗时项] 已关闭 libteflon-rocket(mesa/LLVM) 与 passwall 的 ss-rust 客户端(hostpkg rustc)"
           # ccache 关闭：ccache 把 $(CC) 变两段（"ccache aarch64-..."），
           # 凡是把 $(CC) 当整体用的包（chicken-scheme、icu4c 的 runConfigureICU）都会挂；
           # 且实测命中率接近 0，纯开销。改成只缓存 dl 源码包
