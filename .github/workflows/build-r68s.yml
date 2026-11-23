@@ -144,6 +144,13 @@ jobs:
           echo "  [busybox] 自定义模式已关闭；残留自定义 applet 项: $(grep -c '^CONFIG_BUSYBOX_CONFIG_' .config) 个（应为 0）"
           echo "  [busybox] 默认项: $(grep -c '^CONFIG_BUSYBOX_DEFAULT_' .config) 个"
           if grep -q '^CONFIG_BUSYBOX_CONFIG_' .config; then echo "::error::busybox 自定义项未清空，配置回退失败"; exit 1; fi
+          # 图形栈与路由器无关且极耗时：libmesa-llvmpipe / softpipe 会拉起 hostpkg LLVM 23
+          # （x86 上 4 线程 × 数百个 C++ TU，单这一项就要 1.5h+，上一轮跑满 5h05 正是卡在这里）
+          for p in PACKAGE_libmesa-llvmpipe PACKAGE_libmesa-softpipe PACKAGE_mesa PACKAGE_libglapi \
+                   PACKAGE_libdrm PACKAGE_libwayland PACKAGE_wayland-protocols PACKAGE_vulkan-loader; do
+            disable_sym "$p"
+          done
+          echo "  [图形栈] libmesa-llvmpipe / softpipe / drm / wayland 已关闭，避免编 hostpkg LLVM"
           # ccache 关闭：ccache 把 $(CC) 变两段（"ccache aarch64-..."），
           # 凡是把 $(CC) 当整体用的包（chicken-scheme、icu4c 的 runConfigureICU）都会挂；
           # 且实测命中率接近 0，纯开销。改成只缓存 dl 源码包
